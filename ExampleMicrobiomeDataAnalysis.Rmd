@@ -1,0 +1,183 @@
+---
+title: "Microbiome data analysis"
+author: "Wendy Phillips"
+date: "1/23/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Microbiome analysis
+
+First load the libraries that will be used.
+```{r, message=FALSE}
+library(tidyverse)
+library(vegan)
+library(ape)
+library(ALDEx2)
+library(cowplot)
+library(rstatix)
+library(ggpubr)
+```
+
+Load data: a taxatable and a metadata table.  
+These data are from:  
+Zeller et al. (2014):  https://doi.org/10.15252/msb.20145645.
+
+```{r}
+genus_table <- read.delim("../data/crc_zeller/crc_zeller_genus_table.tsv", sep = "\t", row.names = 1, check.names = FALSE)
+
+metadata <- read.delim("../data/crc_zeller/crc_zeller_metadata.tsv", sep = "\t", check.names = FALSE)
+```
+
+
+First, modify the sample names to use `_` instead of `-`, since the latter gets converted to a `.` by some functions.
+```{r}
+colnames(genus_table) <- gsub("-", "_", colnames(genus_table))
+metadata$sampleid <- gsub("-", "_", metadata$sampleid)
+```
+
+Change the `._.` in the taxonomy strings to the more commonly used `;`.
+```{r}
+rownames(genus_table) <- gsub("\\._.", ";", rownames(genus_table))
+```
+
+Also, move the sampleids to be the rownames for the metadata.
+```{r}
+metadata <- tibble::column_to_rownames(metadata, "sampleid")
+```
+
+
+Check the column sums of the genus table to see if it has already been normalized.
+```{r}
+colSums(genus_table)[1:5]
+```
+
+Rarefy the count table.  
+First check that the sample with the fewest reads still has a reasonable amount of reads.
+```{r}
+min_reads <- min(colSums(genus_table))
+min_reads
+```
+
+For amplicon data, 28042 reads is definitely plenty for a minimum to rarefy to.
+```{r}
+# Transpose the dataframe for use with vegan
+genus_rarefied_t <- data.frame(vegan::rrarefy(t(genus_table), min(colSums(genus_table))))
+```
+
+Look at the row sums again to check the table was rarefied appropriately.
+```{r}
+rowSums(genus_rarefied_t)[1:5]
+```
+
+Remove any genera that now have a count of zero in all samples.
+```{r}
+genus_rarefied_t <- genus_rarefied_t[, colSums(genus_rarefied_t) != 0]
+```
+
+Now we can calculate some alpha metrics.  
+The most basic alpha diversity measure is how many different genera are observed in each sample.
+```{r}
+num_genera <- vegan::specnumber(genus_rarefied_t)
+```
+
+Next, calculate the Shannon-Wiener diversity index.
+```{r}
+shannon <- vegan::diversity(genus_rarefied_t, index = "shannon", MARGIN = 1)
+```
+
+Also, the inverse Simpson's index.
+```{r}
+simpson <- vegan::diversity(genus_rarefied_t, index = "invsimpson", MARGIN = 1)
+```
+
+And Chao1.
+```{r}
+chao1 <- vegan::estimateR(genus_rarefied_t)[2, ]
+```
+
+Now combine all those calculated indices into a single dataframe.
+```{r}
+alpha_values <- data.frame(Num_genera = num_genera, Chao1 = chao1, Shannon = shannon, Simpson = simpson)
+```
+
+Add the metadata category of interest to the alpha_values dataframe.
+```{r}
+alpha_values <- merge(metadata, alpha_values, by = 0)
+```
+
+Rename the merged column of `Row.names` to b `Sample`.
+```{r}
+alpha_values <- alpha_values %>% dplyr::rename("Sample" = "Row.names")
+```
+
+Now plots can be made to visualize the results.
+```{r}
+shannon_plot <- ggplot(alpha_values, aes(x = comparison, y = Shannon)) +
+  geom_boxplot(outlier.color = NA, lwd = 0.5) +
+  theme_cowplot() +
+  geom_jitter(size = 3, width = 0.2, alpha = 0.4, aes(color = comparison)) +
+  scale_color_manual(values = c("#7153db", "#008eb0")) +
+  theme(legend.position = "none") +
+  labs(x = "Group")
+
+shannon_plot
+```
+
+We could make the above plotting code into function.
+```{r}
+alpha_plot <- function(input_table, metric) {
+  ggplot(input_table, aes_string(x = "comparison", y = metric)) +
+    geom_boxplot(outlier.color = NA, lwd = 0.5) +
+    theme_cowplot() +
+    geom_jitter(size = 3, width = 0.2, alpha = 0.4, aes(color = comparison)) +
+    scale_color_manual(values = c("#7153db", "#008eb0")) +
+    theme(legend.position = "none") +
+    labs(x = "Group")
+}
+```
+
+Try the function with one of the alpha metrics.
+```{r}
+alpha_plot(alpha_values, "Chao1")
+```
+
+The function returns a ggplot object, so you can add extra ggplot arguments to it!
+```{r}
+alpha_plot(alpha_values, "Num_genera") + labs(y = "Number of genera")
+```
+
+Now, do a statistical test of whether there is a difference in alpha diversity between the two groups.
+```{r}
+wilcox.test(alpha_values$Shannon[alpha_values$comparison == "H"], alpha_values$Shannon[alpha_values$comparison == "CRC"])
+```
+
+Add statistical test and its output to the plotting function.
+```{r}
+alpha_plot_stat <- function(input_table, metric) {
+  # Do Wilcoxon rank sum test
+  temp <- as.formula(paste0(metric, " ~ comparison"))
+  wilc <- input_table %>% rstatix::wilcox_test(temp)
+
+  # Plot with p-value
+  ggplot(input_table, aes_string(x = "comparison", y = metric)) +
+    geom_boxplot(outlier.color = NA, lwd = 0.5) +
+    theme_cowplot() +
+    geom_jitter(size = 3, width = 0.2, alpha = 0.4, aes(color = comparison)) +
+    scale_color_manual(values = c("#7153db", "#008eb0")) +
+    theme(legend.position = "none") +
+    labs(x = "Group") +
+    ggpubr::stat_pvalue_manual(wilc,
+      label = "p",
+      y.position = 1.1 * max(alpha_values[, metric])
+    )
+}
+```
+
+Try function with one of the alpha metrics.
+```{r}
+alpha_plot_stat(alpha_values, "Chao1")
+```
