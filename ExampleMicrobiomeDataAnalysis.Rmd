@@ -16,92 +16,74 @@ First load the libraries that will be used.
 library(tidyverse)
 library(vegan)
 library(ape)
-library(ALDEx2)
 library(cowplot)
 library(rstatix)
 library(ggpubr)
 ```
 
-Load data: a taxatable and a metadata table.  
-These data are from:  
-Zeller et al. (2014):  https://doi.org/10.15252/msb.20145645.
+ 
+These data are from a study of colorectal cancer (CRC), Zackular et al. 2013 (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3892781/).
 
+Load data: a taxatable and a metadata table. 
 ```{r}
-genus_table <- read.delim("../data/crc_zeller/crc_zeller_genus_table.tsv", sep = "\t", row.names = 1, check.names = FALSE)
+taxatable <- read.delim("data/zackular_taxatable.csv", sep = ",", check.names = FALSE, row.names = 1)
 
-metadata <- read.delim("../data/crc_zeller/crc_zeller_metadata.tsv", sep = "\t", check.names = FALSE)
+metadata <- read.delim("data/zackular_metadata.csv", sep = ",", check.names = FALSE, row.names = 1)
 ```
 
 
-First, modify the sample names to use `_` instead of `-`, since the latter gets converted to a `.` by some functions.
+Check the column sums of the taxa table to see if it has already been normalized.
 ```{r}
-colnames(genus_table) <- gsub("-", "_", colnames(genus_table))
-metadata$sampleid <- gsub("-", "_", metadata$sampleid)
-```
-
-Change the `._.` in the taxonomy strings to the more commonly used `;`.
-```{r}
-rownames(genus_table) <- gsub("\\._.", ";", rownames(genus_table))
-```
-
-Also, move the sampleids to be the rownames for the metadata.
-```{r}
-metadata <- tibble::column_to_rownames(metadata, "sampleid")
-```
-
-
-Check the column sums of the genus table to see if it has already been normalized.
-```{r}
-colSums(genus_table)[1:5]
+colSums(taxatable)[1:5]
 ```
 
 Rarefy the count table.  
 First check that the sample with the fewest reads still has a reasonable amount of reads.
 ```{r}
-min_reads <- min(colSums(genus_table))
+min_reads <- min(colSums(taxatable))
 min_reads
 ```
 
-For amplicon data, 28042 reads is definitely plenty for a minimum to rarefy to.
+For amplicon data, 15704 reads is definitely plenty for a minimum to rarefy to.
 ```{r}
 # Transpose the dataframe for use with vegan
-genus_rarefied_t <- data.frame(vegan::rrarefy(t(genus_table), min(colSums(genus_table))))
+taxa_rarefied_t <- data.frame(vegan::rrarefy(t(taxatable), min(colSums(taxatable))))
 ```
 
 Look at the row sums again to check the table was rarefied appropriately.
 ```{r}
-rowSums(genus_rarefied_t)[1:5]
+rowSums(taxa_rarefied_t)[1:5]
 ```
 
-Remove any genera that now have a count of zero in all samples.
+Remove any taxa that now have a count of zero in all samples.
 ```{r}
-genus_rarefied_t <- genus_rarefied_t[, colSums(genus_rarefied_t) != 0]
+taxa_rarefied_t <- taxa_rarefied_t[, colSums(taxa_rarefied_t) != 0]
 ```
 
 Now we can calculate some alpha metrics.  
-The most basic alpha diversity measure is how many different genera are observed in each sample.
+The most basic alpha diversity measure is how many different taxa are observed in each sample.
 ```{r}
-num_genera <- vegan::specnumber(genus_rarefied_t)
+num_taxa <- vegan::specnumber(taxa_rarefied_t)
 ```
 
 Next, calculate the Shannon-Wiener diversity index.
 ```{r}
-shannon <- vegan::diversity(genus_rarefied_t, index = "shannon", MARGIN = 1)
+shannon <- vegan::diversity(taxa_rarefied_t, index = "shannon", MARGIN = 1)
 ```
 
 Also, the inverse Simpson's index.
 ```{r}
-simpson <- vegan::diversity(genus_rarefied_t, index = "invsimpson", MARGIN = 1)
+simpson <- vegan::diversity(taxa_rarefied_t, index = "invsimpson", MARGIN = 1)
 ```
 
 And Chao1.
 ```{r}
-chao1 <- vegan::estimateR(genus_rarefied_t)[2, ]
+chao1 <- vegan::estimateR(taxa_rarefied_t)[2, ]
 ```
 
 Now combine all those calculated indices into a single dataframe.
 ```{r}
-alpha_values <- data.frame(Num_genera = num_genera, Chao1 = chao1, Shannon = shannon, Simpson = simpson)
+alpha_values <- data.frame(Num_taxa = num_taxa, Chao1 = chao1, Shannon = shannon, Simpson = simpson)
 ```
 
 Add the metadata category of interest to the alpha_values dataframe.
@@ -116,11 +98,11 @@ alpha_values <- alpha_values %>% dplyr::rename("Sample" = "Row.names")
 
 Now plots can be made to visualize the results.
 ```{r}
-shannon_plot <- ggplot(alpha_values, aes(x = comparison, y = Shannon)) +
+shannon_plot <- ggplot(alpha_values, aes(x = DiseaseState, y = Shannon)) +
   geom_boxplot(outlier.color = NA, lwd = 0.5) +
   theme_cowplot() +
-  geom_jitter(size = 3, width = 0.2, alpha = 0.4, aes(color = comparison)) +
-  scale_color_manual(values = c("#7153db", "#008eb0")) +
+  geom_jitter(size = 3, width = 0.2, alpha = 0.4, aes(color = DiseaseState)) +
+  scale_color_manual(values = c("#7153db", "#008eb0", "magenta")) +
   theme(legend.position = "none") +
   labs(x = "Group")
 
@@ -130,11 +112,11 @@ shannon_plot
 We could make the above plotting code into function.
 ```{r}
 alpha_plot <- function(input_table, metric) {
-  ggplot(input_table, aes_string(x = "comparison", y = metric)) +
+  ggplot(input_table, aes_string(x = "DiseaseState", y = metric)) +
     geom_boxplot(outlier.color = NA, lwd = 0.5) +
     theme_cowplot() +
-    geom_jitter(size = 3, width = 0.2, alpha = 0.4, aes(color = comparison)) +
-    scale_color_manual(values = c("#7153db", "#008eb0")) +
+    geom_jitter(size = 3, width = 0.2, alpha = 0.4, aes(color = DiseaseState)) +
+    scale_color_manual(values = c("#7153db", "#008eb0", "magenta")) +
     theme(legend.position = "none") +
     labs(x = "Group")
 }
@@ -147,26 +129,26 @@ alpha_plot(alpha_values, "Chao1")
 
 The function returns a ggplot object, so you can add extra ggplot arguments to it!
 ```{r}
-alpha_plot(alpha_values, "Num_genera") + labs(y = "Number of genera")
+alpha_plot(alpha_values, "Num_taxa") + labs(y = "Number of taxa")
 ```
 
-Now, do a statistical test of whether there is a difference in alpha diversity between the two groups.
+Now, do a statistical test of whether there is a difference in alpha diversity between the two groups healthy and CRC.
 ```{r}
-wilcox.test(alpha_values$Shannon[alpha_values$comparison == "H"], alpha_values$Shannon[alpha_values$comparison == "CRC"])
+wilcox.test(alpha_values$Shannon[alpha_values$DiseaseState == "H"], alpha_values$Shannon[alpha_values$DiseaseState == "CRC"])
 ```
 
 Add statistical test and its output to the plotting function.
 ```{r}
 alpha_plot_stat <- function(input_table, metric) {
   # Do Wilcoxon rank sum test
-  temp <- as.formula(paste0(metric, " ~ comparison"))
+  temp <- as.formula(paste0(metric, " ~ DiseaseState"))
   wilc <- input_table %>% rstatix::wilcox_test(temp)
 
   # Plot with p-value
-  ggplot(input_table, aes_string(x = "comparison", y = metric)) +
+  ggplot(input_table, aes_string(x = "DiseaseState", y = metric)) +
     geom_boxplot(outlier.color = NA, lwd = 0.5) +
     theme_cowplot() +
-    geom_jitter(size = 3, width = 0.2, alpha = 0.4, aes(color = comparison)) +
+    geom_jitter(size = 3, width = 0.2, alpha = 0.4, aes(color = DiseaseState)) +
     scale_color_manual(values = c("#7153db", "#008eb0")) +
     theme(legend.position = "none") +
     labs(x = "Group") +
@@ -179,5 +161,7 @@ alpha_plot_stat <- function(input_table, metric) {
 
 Try function with one of the alpha metrics.
 ```{r}
-alpha_plot_stat(alpha_values, "Chao1")
+# Need to subset to just two DiseaseStates
+alpha_values_sub <- alpha_values %>% dplyr::filter(DiseaseState %in% c("H", "CRC"))
+alpha_plot_stat(alpha_values_sub, "Chao1")
 ```
