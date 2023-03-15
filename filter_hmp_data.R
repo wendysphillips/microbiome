@@ -2,6 +2,8 @@ library(tidyverse)
 
 # Loading data from HMP2 ----
 
+# Data tables originated from https://ibdmdb.org/tunnel/public/summary.html
+
 # The metadata table was already partially filtered from full table
 metadata <- read.delim("data/hmp2_metadata_partial.csv", sep = ",", check.names = FALSE)
 
@@ -82,4 +84,3 @@ species <- species[,((colSums(species) > 98) & (colSums(species) < 102 ) )]
 
 # Also drop those from metadata
 meta <- meta[meta$External_ID %in% colnames(species),]
-
