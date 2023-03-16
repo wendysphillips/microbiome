@@ -2,25 +2,52 @@
 
 # Load libraries that will be used
 library(vegan)
-library(ecodist)
+library(ape)
 
 # First run the filter_hmp_data.R code
 # Can be done by uncommenting next line
-# source("filter_hmp_data.R")
+source("filter_hmp_data.R")
 
+# Calculate Bray-Curtis dissimilarity matrix
 BC <- vegan::vegdist(t(species), method = "bray")
 
 # Get pcoa
-BC_pcoa <- ecodist::pco(BC)
+BC_pcoa <- ape::pcoa(BC)
 
-# Get info on first two pcoa axes
+# Get coordinates first first two pcoa axes
 BC_pcoa_df <- data.frame(
   pcoa1 = BC_pcoa$vectors[,1],
   pcoa2 = BC_pcoa$vectors[,2]
 )
 
+# Simple plot
 pc_plot <- ggplot(BC_pcoa_df, aes(x = pcoa1, y = pcoa2)) +
   geom_point(alpha = 0.5) +
   theme_classic()
 
 pc_plot
+
+# Combine with metadata
+BC_pcoa_df$External_ID <- colnames(species)
+BC_pcoa_all <- left_join(BC_pcoa_df, metadata, by = "External_ID")
+
+# Plot with metadata variable
+pc_plot <- ggplot(BC_pcoa_all, aes(x = pcoa1, y = pcoa2)) +
+      geom_point(alpha = 0.5, aes(color = diagnosis)) +
+      theme_classic() +
+      labs(x = paste0("PCoA1 ", round(BC_pcoa$values$Eigenvalues[1],1), " %"), y = paste0("PCoA2 ", round(BC_pcoa$values$Eigenvalues[2],1), " %"))
+
+pc_plot
+
+# Make the above into a function
+#  to input different metadata
+pcoa_plot <- function(meta = "Chemotherapy"){
+      pc_plot <- ggplot(BC_pcoa_all, aes(x = pcoa1, y = pcoa2)) +
+            geom_point(alpha = 0.5, aes_string(color = meta)) +
+            theme_classic() +
+            labs(x = paste0("PCoA1, ", round(BC_pcoa$values$Eigenvalues[1],1), " %"), y = paste0("PCoA2, ", round(BC_pcoa$values$Eigenvalues[2],1), " %"))
+      
+      pc_plot
+}
+
+pcoa_plot()
